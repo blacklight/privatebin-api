@@ -29,3 +29,7 @@ class BadServerResponseError(PrivateBinAPIError):
 
 class UnsupportedFeatureError(PrivateBinAPIError):
     """Indicates that a PrivateBin host does not support the operation attempted"""
+
+
+class BadAuthConfigError(PrivateBinAPIError):
+    """Indicates that the authentication configuration is invalid."""
