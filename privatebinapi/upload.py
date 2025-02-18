@@ -38,6 +38,96 @@ EXPIRATION_TIMES = (
 FORMAT_TYPES = ("plaintext", "syntaxhighlighting", "markdown")
 
 
+def _get_auth_cfg(
+    auth: Optional[str] = None,
+    auth_user: Optional[str] = None,
+    auth_pass: Optional[str] = None,
+    auth_headers: Optional[Mapping[str, str]] = None,
+) -> dict:
+    """
+    Utility method that validates and returns the authentication data as a dict.
+    """
+    auth_custom = None
+    if auth:
+        if auth == "basic":
+            if not all((auth_user, auth_pass)):
+                raise BadAuthConfigError(
+                    "auth_user and auth_pass must be provided for basic authentication"
+                )
+        elif auth == "custom":
+            if not auth_headers:
+                raise BadAuthConfigError(
+                    "auth_headers must be provided for custom authentication"
+                )
+
+            try:
+                auth_custom = json.dumps(dict(auth_headers))
+            except (TypeError, ValueError) as error:
+                raise BadAuthConfigError(
+                    "auth_headers must be a valid JSON-able object"
+                ) from error
+        else:
+            raise BadAuthConfigError(
+                "auth must be 'basic', 'custom', or None (default)"
+            )
+
+    return {
+        "auth": auth,
+        "auth_user": auth_user,
+        "auth_pass": auth_pass,
+        "auth_custom": auth_custom,
+    }
+
+
+def _get_cfg(
+    server: str,
+    *,
+    text: Optional[str] = None,
+    file: Optional[str] = None,
+    expiration: str = "1day",
+    compression: str = "zlib",
+    formatting: str = "plaintext",
+    auth: Optional[str] = None,
+    auth_user: Optional[str] = None,
+    auth_pass: Optional[str] = None,
+    auth_headers: Optional[Mapping[str, str]] = None,
+) -> dict:
+    """
+    :return: A configuration dictionary for the PrivateBin API.
+    """
+    if not any((text, file)):
+        raise ValueError("text and file many not both be None")
+    if formatting not in FORMAT_TYPES:
+        raise BadFormatError(
+            "formatting %s must be in %s" % (repr(formatting), FORMAT_TYPES)
+        )
+    if expiration not in EXPIRATION_TIMES:
+        raise BadExpirationTimeError(
+            "expiration %s must be in %s" % (repr(expiration), EXPIRATION_TIMES)
+        )
+    if compression not in COMPRESSION_TYPES:
+        raise BadCompressionTypeError(
+            "compression %s must be in %s" % (repr(compression), COMPRESSION_TYPES)
+        )
+
+    auth_cfg = _get_auth_cfg(
+        auth=auth, auth_user=auth_user, auth_pass=auth_pass, auth_headers=auth_headers
+    )
+
+    return {
+        "server": server,
+        "proxy": None,
+        "short_api": None,
+        "short_url": None,
+        "short_user": None,
+        "short_pass": None,
+        "short_token": None,
+        "no_check_certificate": False,
+        "no_insecure_warning": False,
+        **auth_cfg,
+    }
+
+
 def prepare_upload(
     server: str,
     *,
@@ -76,61 +166,18 @@ def prepare_upload(
     :param auth_headers: A mapping containing the custom authentication header(s).
     :return: A tuple of the JSON data to POST to the PrivateBin host and the paste's hash
     """
-    if not any((text, file)):
-        raise ValueError("text and file many not both be None")
-    if formatting not in FORMAT_TYPES:
-        raise BadFormatError(
-            "formatting %s must be in %s" % (repr(formatting), FORMAT_TYPES)
-        )
-    if expiration not in EXPIRATION_TIMES:
-        raise BadExpirationTimeError(
-            "expiration %s must be in %s" % (repr(expiration), EXPIRATION_TIMES)
-        )
-    if compression not in COMPRESSION_TYPES:
-        raise BadCompressionTypeError(
-            "compression %s must be in %s" % (repr(compression), COMPRESSION_TYPES)
-        )
-
-    auth_custom = None
-    if auth:
-        if auth == "basic":
-            if not all((auth_user, auth_pass)):
-                raise BadAuthConfigError(
-                    "auth_user and auth_pass must be provided for basic authentication"
-                )
-        elif auth == "custom":
-            if not auth_headers:
-                raise BadAuthConfigError(
-                    "auth_headers must be provided for custom authentication"
-                )
-
-            try:
-                auth_custom = json.dumps(dict(auth_headers))
-            except (TypeError, ValueError) as error:
-                raise BadAuthConfigError(
-                    "auth_headers must be a valid JSON-able object"
-                ) from error
-        else:
-            raise BadAuthConfigError(
-                "auth must be 'basic', 'custom', or None (default)"
-            )
-
-    paste = Paste()
-    settings = {
-        "server": server,
-        "proxy": None,
-        "short_api": None,
-        "short_url": None,
-        "short_user": None,
-        "short_pass": None,
-        "short_token": None,
-        "no_check_certificate": False,
-        "no_insecure_warning": False,
-        "auth": auth,
-        "auth_user": auth_user,
-        "auth_pass": auth_pass,
-        "auth_custom": auth_custom,
-    }
+    settings = _get_cfg(
+        server,
+        text=text,
+        file=file,
+        expiration=expiration,
+        compression=compression,
+        formatting=formatting,
+        auth=auth,
+        auth_user=auth_user,
+        auth_pass=auth_pass,
+        auth_headers=auth_headers,
+    )
 
     api_client = PrivateBin(settings)
 
@@ -141,6 +188,7 @@ def prepare_upload(
             "The host failed to respond with PrivateBin version information."
         ) from error
 
+    paste = Paste()
     paste.setVersion(version)
     if version == 2 and compression:
         paste.setCompression(compression)
